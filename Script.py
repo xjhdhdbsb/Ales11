@@ -16,9 +16,9 @@ class GPTChat:
             self.tokenizer = OpenAIGPTTokenizer.from_pretrained("openai-gpt")
             self.model = OpenAIGPTLMHeadModel.from_pretrained("openai-gpt")
         elif model_type == "gpt2":
-            print("🤖 Загружаю GPT-2...")
-            self.tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
-            self.model = GPT2LMHeadModel.from_pretrained("gpt2")
+            print("🤖 Загружаю GPT-2 Medium...")
+            self.tokenizer = GPT2Tokenizer.from_pretrained("gpt2-medium")
+            self.model = GPT2LMHeadModel.from_pretrained("gpt2-medium")
             # Устанавливаем pad_token для GPT-2
             self.tokenizer.pad_token = self.tokenizer.eos_token
         
@@ -58,12 +58,12 @@ class GPTChat:
             """
         else:
             return """
-📊 GPT-2 (2019):
-• Параметры: 124M (small версия)
-• Слоев: 12
-• Размер эмбеддингов: 768
+📊 GPT-2 Medium (2019):
+• Параметры: 355M
+• Слоев: 24
+• Размер эмбеддингов: 1024
 • Контекст: 1024 токена
-• Особенности: Улучшенная архитектура, лучшее качество текста
+• Особенности: Средняя версия GPT-2, лучшее качество чем Small
 • Обучение: 40GB текста из интернета (WebText)
             """
 
@@ -220,7 +220,7 @@ def main():
     print("🚀 Добро пожаловать в GPT Chat!")
     print("\nВыберите модель:")
     print("1. GPT-1 (117M параметров, 2018)")
-    print("2. GPT-2 (124M параметров, 2019)")
+    print("2. GPT-2 Medium (355M параметров, 2019)")
     
     while True:
         choice = input("\nВаш выбор (1/2): ").strip()
