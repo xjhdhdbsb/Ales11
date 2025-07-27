@@ -11,7 +11,7 @@ class GPT1Chat:
         self.model.eval()
         
         # Настройки генерации
-        self.max_length = 100
+        self.max_length = 250
         self.temperature = 0.8
         self.top_k = 50
         
@@ -45,7 +45,7 @@ class GPT1Chat:
             with torch.no_grad():
                 outputs = self.model.generate(
                     inputs,
-                    max_length=inputs.size(1) + 50,
+                    max_length=inputs.size(1) + 60,
                     temperature=self.temperature,
                     top_k=self.top_k,
                     do_sample=True,
@@ -66,6 +66,20 @@ class GPT1Chat:
             if "\nBot:" in bot_response:
                 bot_response = bot_response.split("\nBot:")[0].strip()
             
+            # Обрезаем ответ до 250 символов если нужно
+            if len(bot_response) > 250:
+                # Ищем последнее полное предложение в пределах 250 символов
+                truncated = bot_response[:250]
+                last_sentence_end = max(
+                    truncated.rfind('.'),
+                    truncated.rfind('!'),
+                    truncated.rfind('?')
+                )
+                if last_sentence_end > 100:  # Если есть разумное место для обрезки
+                    bot_response = truncated[:last_sentence_end + 1]
+                else:
+                    bot_response = truncated.rstrip() + "..."
+            
             return bot_response if bot_response else "I don't understand. Could you rephrase?"
             
         except Exception as e:
@@ -74,7 +88,7 @@ class GPT1Chat:
     def show_settings(self):
         """Показывает текущие настройки"""
         print(f"\n⚙️ Текущие настройки:")
-        print(f"   Максимальная длина ответа: {self.max_length}")
+        print(f"   Максимальная длина ответа: {self.max_length} символов")
         print(f"   Температура (креативность): {self.temperature}")
         print(f"   Top-k сэмплирование: {self.top_k}")
         print()
@@ -88,9 +102,9 @@ class GPT1Chat:
             if new_temp.strip():
                 self.temperature = max(0.1, min(2.0, float(new_temp)))
             
-            new_length = input(f"Новая максимальная длина (10-200, текущая {self.max_length}): ")
+            new_length = input(f"Новая максимальная длина символов (50-500, текущая {self.max_length}): ")
             if new_length.strip():
-                self.max_length = max(10, min(200, int(new_length)))
+                self.max_length = max(50, min(500, int(new_length)))
             
             new_top_k = input(f"Новый top-k (1-100, текущий {self.top_k}): ")
             if new_top_k.strip():
