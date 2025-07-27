@@ -76,19 +76,35 @@ class GPTChat:
             else:
                 prompt = f"Human: {user_input}\nAssistant:"
             
-            # Токенизируем
-            inputs = self.tokenizer.encode(prompt, return_tensors="pt")
+            # Токенизируем с attention_mask
+            encoded = self.tokenizer(
+                prompt, 
+                return_tensors="pt", 
+                padding=True, 
+                truncation=True,
+                max_length=512 if self.model_type == "gpt1" else 800
+            )
             
-            # Ограничиваем длину контекста
-            max_context = 512 if self.model_type == "gpt1" else 800
+            inputs = encoded['input_ids']
+            attention_mask = encoded.get('attention_mask', None)
+            
+            # Ограичиваем длину контекста
+            max_context = 400 if self.model_type == "gpt1" else 600
             if inputs.size(1) > max_context:
                 inputs = inputs[:, -max_context:]
+                if attention_mask is not None:
+                    attention_mask = attention_mask[:, -max_context:]
             
-            # Генерируем
+            # Очищаем память перед генерацией
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            
+            # Генерируем с фиксированными параметрами
             with torch.no_grad():
                 outputs = self.model.generate(
                     inputs,
-                    max_length=inputs.size(1) + 80,
+                    attention_mask=attention_mask,
+                    max_new_tokens=60,  # Используем max_new_tokens вместо max_length
                     temperature=self.temperature,
                     top_k=self.top_k,
                     top_p=self.top_p,
@@ -96,7 +112,8 @@ class GPTChat:
                     pad_token_id=self.tokenizer.eos_token_id,
                     eos_token_id=self.tokenizer.eos_token_id,
                     no_repeat_ngram_size=2,
-                    repetition_penalty=1.1
+                    repetition_penalty=1.1,
+                    early_stopping=True
                 )
             
             # Декодируем полный ответ
@@ -107,9 +124,13 @@ class GPTChat:
             bot_response = full_response[len(prompt_text):].strip()
             
             # Очищаем ответ от лишних частей
-            for separator in ["\nHuman:", "\nAssistant:", "\n\n"]:
+            for separator in ["\nHuman:", "\nAssistant:", "\n\n", "Human:", "Assistant:"]:
                 if separator in bot_response:
                     bot_response = bot_response.split(separator)[0].strip()
+            
+            # Удаляем кавычки если ответ в них обернут
+            if bot_response.startswith('"') and bot_response.endswith('"'):
+                bot_response = bot_response[1:-1].strip()
             
             # Обрезаем ответ до максимальной длины
             if len(bot_response) > self.max_length:
@@ -119,14 +140,21 @@ class GPTChat:
                     truncated.rfind('!'),
                     truncated.rfind('?')
                 )
-                if last_sentence_end > 50:
+                if last_sentence_end > 30:
                     bot_response = truncated[:last_sentence_end + 1]
                 else:
                     bot_response = truncated.rstrip() + "..."
             
+            # Очищаем память после генерации
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            
             return bot_response if bot_response else "I'm not sure how to respond to that. Could you try rephrasing?"
             
         except Exception as e:
+            # Очищаем память при ошибке
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
             return f"❌ Ошибка генерации: {str(e)}"
 
     def show_settings(self):
