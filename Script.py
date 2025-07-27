@@ -7,7 +7,7 @@ class GPTChat:
     def __init__(self, model_type="gpt2"):
         """
         Инициализация чат-бота
-        model_type: "gpt1" или "gpt2"
+        model_type: "gpt1", "gpt2", или "gpt2-xl"
         """
         self.model_type = model_type
         
@@ -21,14 +21,26 @@ class GPTChat:
             self.model = GPT2LMHeadModel.from_pretrained("gpt2-medium")
             # Устанавливаем pad_token для GPT-2
             self.tokenizer.pad_token = self.tokenizer.eos_token
+        elif model_type == "gpt2-xl":
+            print("🤖 Загружаю GPT-2 XL (это может занять некоторое время)...")
+            self.tokenizer = GPT2Tokenizer.from_pretrained("gpt2-xl")
+            self.model = GPT2LMHeadModel.from_pretrained("gpt2-xl")
+            # Устанавливаем pad_token для GPT-2
+            self.tokenizer.pad_token = self.tokenizer.eos_token
         
         self.model.eval()
         
-        # Увеличенные настройки генерации
-        self.max_length = 1000  # Увеличено до 1000 символов
-        self.temperature = 0.8
-        self.top_k = 50
-        self.top_p = 0.9
+        # Настройки генерации в зависимости от модели
+        if model_type == "gpt2-xl":
+            self.max_length = 1500  # Увеличено для XL модели
+            self.temperature = 0.8
+            self.top_k = 50
+            self.top_p = 0.9
+        else:
+            self.max_length = 1000
+            self.temperature = 0.8
+            self.top_k = 50
+            self.top_p = 0.9
         
         print(f"✅ {model_type.upper()} готов к общению!")
         self.show_commands()
@@ -56,7 +68,7 @@ class GPTChat:
 • Особенности: Первая модель семейства, базовая архитектура Transformer
 • Обучение: Несуперевизорное на корпусе BookCorpus
             """
-        else:
+        elif self.model_type == "gpt2":
             return """
 📊 GPT-2 Medium (2019):
 • Параметры: 355M
@@ -65,6 +77,17 @@ class GPTChat:
 • Контекст: 1024 токена
 • Особенности: Средняя версия GPT-2, лучшее качество чем Small
 • Обучение: 40GB текста из интернета (WebText)
+            """
+        elif self.model_type == "gpt2-xl":
+            return """
+📊 GPT-2 XL (2019):
+• Параметры: 1.5B
+• Слоев: 48
+• Размер эмбеддингов: 1600
+• Контекст: 1024 токена
+• Особенности: Самая большая публично доступная версия GPT-2
+• Обучение: 40GB текста из интернета (WebText)
+• Требования: ~6GB видеопамяти или оперативной памяти
             """
 
     def generate_response(self, user_input):
@@ -76,20 +99,30 @@ class GPTChat:
             else:
                 prompt = f"Human: {user_input}\nAssistant:"
             
+            # Настройки токенизации в зависимости от модели
+            if self.model_type == "gpt1":
+                max_input_length = 512
+                max_context = 400
+            elif self.model_type == "gpt2":
+                max_input_length = 800
+                max_context = 600
+            else:  # gpt2-xl
+                max_input_length = 900
+                max_context = 700
+            
             # Токенизируем с attention_mask
             encoded = self.tokenizer(
                 prompt, 
                 return_tensors="pt", 
                 padding=True, 
                 truncation=True,
-                max_length=512 if self.model_type == "gpt1" else 800
+                max_length=max_input_length
             )
             
             inputs = encoded['input_ids']
             attention_mask = encoded.get('attention_mask', None)
             
             # Ограничиваем длину контекста
-            max_context = 400 if self.model_type == "gpt1" else 600
             if inputs.size(1) > max_context:
                 inputs = inputs[:, -max_context:]
                 if attention_mask is not None:
@@ -99,8 +132,13 @@ class GPTChat:
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
             
-            # Увеличиваем количество новых токенов для генерации более длинных ответов
-            max_new_tokens = 150 if self.model_type == "gpt1" else 200
+            # Настройки генерации в зависимости от модели
+            if self.model_type == "gpt1":
+                max_new_tokens = 150
+            elif self.model_type == "gpt2":
+                max_new_tokens = 200
+            else:  # gpt2-xl
+                max_new_tokens = 250
             
             # Генерируем с исправленными параметрами
             with torch.no_grad():
@@ -116,7 +154,6 @@ class GPTChat:
                     eos_token_id=self.tokenizer.eos_token_id,
                     no_repeat_ngram_size=2,
                     repetition_penalty=1.1,
-                    # Убираем early_stopping=True чтобы избежать предупреждения
                 )
             
             # Декодируем полный ответ
@@ -135,7 +172,7 @@ class GPTChat:
             if bot_response.startswith('"') and bot_response.endswith('"'):
                 bot_response = bot_response[1:-1].strip()
             
-            # Обрезаем ответ до максимальной длины (теперь 1000 символов)
+            # Обрезаем ответ до максимальной длины
             if len(bot_response) > self.max_length:
                 truncated = bot_response[:self.max_length]
                 # Ищем последнее завершение предложения
@@ -179,9 +216,10 @@ class GPTChat:
             if new_temp.strip():
                 self.temperature = max(0.1, min(2.0, float(new_temp)))
             
-            new_length = input(f"Новая максимальная длина (50-2000, текущая {self.max_length}): ")
+            max_possible_length = 2500 if self.model_type == "gpt2-xl" else 2000
+            new_length = input(f"Новая максимальная длина (50-{max_possible_length}, текущая {self.max_length}): ")
             if new_length.strip():
-                self.max_length = max(50, min(2000, int(new_length)))
+                self.max_length = max(50, min(max_possible_length, int(new_length)))
             
             new_top_k = input(f"Новый top-k (1-100, текущий {self.top_k}): ")
             if new_top_k.strip():
@@ -236,8 +274,14 @@ class GPTChat:
                 # Обновляем историю
                 self.conversation_history += f"\nHuman: {user_input}\nAssistant: {response}"
                 
-                # Ограничиваем историю (увеличиваем лимиты для более длинных ответов)
-                max_history = 1000 if self.model_type == "gpt1" else 1500
+                # Ограничиваем историю (увеличиваем лимиты для XL модели)
+                if self.model_type == "gpt1":
+                    max_history = 1000
+                elif self.model_type == "gpt2":
+                    max_history = 1500
+                else:  # gpt2-xl
+                    max_history = 2000
+                    
                 if len(self.conversation_history) > max_history:
                     self.conversation_history = self.conversation_history[-max_history:]
                 
@@ -253,9 +297,10 @@ def main():
     print("\nВыберите модель:")
     print("1. GPT-1 (117M параметров, 2018)")
     print("2. GPT-2 Medium (355M параметров, 2019)")
+    print("3. GPT-2 XL (1.5B параметров, 2019) - требует больше памяти")
     
     while True:
-        choice = input("\nВаш выбор (1/2): ").strip()
+        choice = input("\nВаш выбор (1/2/3): ").strip()
         
         if choice == "1":
             model_type = "gpt1"
@@ -263,8 +308,16 @@ def main():
         elif choice == "2":
             model_type = "gpt2"
             break
+        elif choice == "3":
+            model_type = "gpt2-xl"
+            print("⚠️ Внимание: GPT-2 XL требует около 6GB памяти и может работать медленно без GPU.")
+            confirm = input("Продолжить? (y/n): ").strip().lower()
+            if confirm in ['y', 'yes', 'да', 'д']:
+                break
+            else:
+                continue
         else:
-            print("❌ Неверный выбор. Введите 1 или 2.")
+            print("❌ Неверный выбор. Введите 1, 2 или 3.")
     
     # Создаем и запускаем чат
     chat = GPTChat(model_type)
