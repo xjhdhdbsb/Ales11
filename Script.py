@@ -1,96 +1,141 @@
-from transformers import OpenAIGPTTokenizer, OpenAIGPTLMHeadModel
+from transformers import GPT2Tokenizer, GPT2LMHeadModel, OpenAIGPTTokenizer, OpenAIGPTLMHeadModel
 import torch
 import warnings
 warnings.filterwarnings("ignore")
 
-class GPT1Chat:
-    def __init__(self):
-        print("🤖 Загружаю GPT-1...")
-        self.tokenizer = OpenAIGPTTokenizer.from_pretrained("openai-gpt")
-        self.model = OpenAIGPTLMHeadModel.from_pretrained("openai-gpt")
+class GPTChat:
+    def __init__(self, model_type="gpt2"):
+        """
+        Инициализация чат-бота
+        model_type: "gpt1" или "gpt2"
+        """
+        self.model_type = model_type
+        
+        if model_type == "gpt1":
+            print("🤖 Загружаю GPT-1...")
+            self.tokenizer = OpenAIGPTTokenizer.from_pretrained("openai-gpt")
+            self.model = OpenAIGPTLMHeadModel.from_pretrained("openai-gpt")
+        elif model_type == "gpt2":
+            print("🤖 Загружаю GPT-2...")
+            self.tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
+            self.model = GPT2LMHeadModel.from_pretrained("gpt2")
+            # Устанавливаем pad_token для GPT-2
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+        
         self.model.eval()
         
         # Настройки генерации
         self.max_length = 250
         self.temperature = 0.8
         self.top_k = 50
+        self.top_p = 0.9  # Добавляем top-p для лучшего контроля
         
-        print("✅ GPT-1 готов к общению!")
-        print("💡 Команды:")
-        print("   /settings - изменить настройки")
-        print("   /clear - очистить историю")
-        print("   /quit или /exit - выйти")
-        print("=" * 50)
+        print(f"✅ {model_type.upper()} готов к общению!")
+        self.show_commands()
         
         # История разговора
         self.conversation_history = ""
+
+    def show_commands(self):
+        print("💡 Команды:")
+        print("   /settings - изменить настройки")
+        print("   /clear - очистить историю")
+        print("   /info - информация о модели")
+        print("   /quit или /exit - выйти")
+        print("=" * 50)
+
+    def get_model_info(self):
+        """Возвращает информацию о модели"""
+        if self.model_type == "gpt1":
+            return """
+📊 GPT-1 (2018):
+• Параметры: 117M
+• Слоев: 12
+• Размер эмбеддингов: 768
+• Контекст: 512 токенов
+• Особенности: Первая модель семейства, базовая архитектура Transformer
+• Обучение: Несуперевизорное на корпусе BookCorpus
+            """
+        else:
+            return """
+📊 GPT-2 (2019):
+• Параметры: 124M (small версия)
+• Слоев: 12
+• Размер эмбеддингов: 768
+• Контекст: 1024 токена
+• Особенности: Улучшенная архитектура, лучшее качество текста
+• Обучение: 40GB текста из интернета (WebText)
+            """
 
     def generate_response(self, user_input):
         """Генерирует ответ на основе ввода пользователя"""
         try:
             # Формируем промпт с историей
             if self.conversation_history:
-                prompt = f"{self.conversation_history}\nYou: {user_input}\nBot:"
+                prompt = f"{self.conversation_history}\nHuman: {user_input}\nAssistant:"
             else:
-                prompt = f"You: {user_input}\nBot:"
+                prompt = f"Human: {user_input}\nAssistant:"
             
             # Токенизируем
             inputs = self.tokenizer.encode(prompt, return_tensors="pt")
             
             # Ограничиваем длину контекста
-            if inputs.size(1) > 500:  # Если контекст слишком длинный
-                inputs = inputs[:, -400:]  # Берем последние 400 токенов
+            max_context = 512 if self.model_type == "gpt1" else 800
+            if inputs.size(1) > max_context:
+                inputs = inputs[:, -max_context:]
             
             # Генерируем
             with torch.no_grad():
                 outputs = self.model.generate(
                     inputs,
-                    max_length=inputs.size(1) + 60,
+                    max_length=inputs.size(1) + 80,
                     temperature=self.temperature,
                     top_k=self.top_k,
+                    top_p=self.top_p,
                     do_sample=True,
                     pad_token_id=self.tokenizer.eos_token_id,
                     eos_token_id=self.tokenizer.eos_token_id,
-                    no_repeat_ngram_size=2
+                    no_repeat_ngram_size=2,
+                    repetition_penalty=1.1
                 )
             
             # Декодируем полный ответ
             full_response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
             
             # Извлекаем только ответ бота
-            bot_response = full_response[len(self.tokenizer.decode(inputs[0], skip_special_tokens=True)):].strip()
+            prompt_text = self.tokenizer.decode(inputs[0], skip_special_tokens=True)
+            bot_response = full_response[len(prompt_text):].strip()
             
-            # Убираем лишние части если есть
-            if "\nYou:" in bot_response:
-                bot_response = bot_response.split("\nYou:")[0].strip()
-            if "\nBot:" in bot_response:
-                bot_response = bot_response.split("\nBot:")[0].strip()
+            # Очищаем ответ от лишних частей
+            for separator in ["\nHuman:", "\nAssistant:", "\n\n"]:
+                if separator in bot_response:
+                    bot_response = bot_response.split(separator)[0].strip()
             
-            # Обрезаем ответ до 250 символов если нужно
-            if len(bot_response) > 250:
-                # Ищем последнее полное предложение в пределах 250 символов
-                truncated = bot_response[:250]
+            # Обрезаем ответ до максимальной длины
+            if len(bot_response) > self.max_length:
+                truncated = bot_response[:self.max_length]
                 last_sentence_end = max(
                     truncated.rfind('.'),
                     truncated.rfind('!'),
                     truncated.rfind('?')
                 )
-                if last_sentence_end > 100:  # Если есть разумное место для обрезки
+                if last_sentence_end > 50:
                     bot_response = truncated[:last_sentence_end + 1]
                 else:
                     bot_response = truncated.rstrip() + "..."
             
-            return bot_response if bot_response else "I don't understand. Could you rephrase?"
+            return bot_response if bot_response else "I'm not sure how to respond to that. Could you try rephrasing?"
             
         except Exception as e:
             return f"❌ Ошибка генерации: {str(e)}"
 
     def show_settings(self):
         """Показывает текущие настройки"""
-        print(f"\n⚙️ Текущие настройки:")
+        print(f"\n⚙️ Текущие настройки ({self.model_type.upper()}):")
         print(f"   Максимальная длина ответа: {self.max_length} символов")
         print(f"   Температура (креативность): {self.temperature}")
         print(f"   Top-k сэмплирование: {self.top_k}")
+        print(f"   Top-p сэмплирование: {self.top_p}")
         print()
 
     def change_settings(self):
@@ -98,17 +143,21 @@ class GPT1Chat:
         self.show_settings()
         
         try:
-            new_temp = input("Новая температура (0.1-2.0, текущая {:.1f}): ".format(self.temperature))
+            new_temp = input(f"Новая температура (0.1-2.0, текущая {self.temperature:.1f}): ")
             if new_temp.strip():
                 self.temperature = max(0.1, min(2.0, float(new_temp)))
             
-            new_length = input(f"Новая максимальная длина символов (50-500, текущая {self.max_length}): ")
+            new_length = input(f"Новая максимальная длина (50-500, текущая {self.max_length}): ")
             if new_length.strip():
                 self.max_length = max(50, min(500, int(new_length)))
             
             new_top_k = input(f"Новый top-k (1-100, текущий {self.top_k}): ")
             if new_top_k.strip():
                 self.top_k = max(1, min(100, int(new_top_k)))
+            
+            new_top_p = input(f"Новый top-p (0.1-1.0, текущий {self.top_p:.1f}): ")
+            if new_top_p.strip():
+                self.top_p = max(0.1, min(1.0, float(new_top_p)))
             
             print("✅ Настройки обновлены!")
             self.show_settings()
@@ -120,8 +169,7 @@ class GPT1Chat:
         """Основной цикл чата"""
         while True:
             try:
-                # Получаем ввод пользователя
-                user_input = input("\n👤 Вы: ").strip()
+                user_input = input(f"\n👤 Вы: ").strip()
                 
                 if not user_input:
                     continue
@@ -140,34 +188,55 @@ class GPT1Chat:
                     self.change_settings()
                     continue
                 
+                elif user_input.lower() == '/info':
+                    print(self.get_model_info())
+                    continue
+                
                 elif user_input.lower() == '/help':
-                    print("💡 Доступные команды:")
-                    print("   /settings - изменить настройки генерации")
-                    print("   /clear - очистить историю разговора")
-                    print("   /help - показать эту справку")
-                    print("   /quit или /exit - выйти из чата")
+                    self.show_commands()
                     continue
                 
                 # Генерируем ответ
-                print("🤖 GPT-1 думает...", end="", flush=True)
+                print(f"🤖 {self.model_type.upper()} думает...", end="", flush=True)
                 response = self.generate_response(user_input)
-                print(f"\r🤖 GPT-1: {response}")
+                print(f"\r🤖 {self.model_type.upper()}: {response}")
                 
                 # Обновляем историю
-                self.conversation_history += f"\nYou: {user_input}\nBot: {response}"
+                self.conversation_history += f"\nHuman: {user_input}\nAssistant: {response}"
                 
                 # Ограничиваем историю
-                if len(self.conversation_history) > 1000:
-                    # Оставляем последние 800 символов
-                    self.conversation_history = self.conversation_history[-800:]
+                max_history = 800 if self.model_type == "gpt1" else 1200
+                if len(self.conversation_history) > max_history:
+                    self.conversation_history = self.conversation_history[-max_history:]
                 
             except KeyboardInterrupt:
-                print("\n\n👋 Чат прерван пользователем. До свидания!")
+                print(f"\n\n👋 Чат с {self.model_type.upper()} прерван. До свидания!")
                 break
             except Exception as e:
                 print(f"\n❌ Ошибка: {e}")
-                print("Попробуйте еще раз или используйте /quit для выхода.")
+
+def main():
+    """Главная функция для выбора модели"""
+    print("🚀 Добро пожаловать в GPT Chat!")
+    print("\nВыберите модель:")
+    print("1. GPT-1 (117M параметров, 2018)")
+    print("2. GPT-2 (124M параметров, 2019)")
+    
+    while True:
+        choice = input("\nВаш выбор (1/2): ").strip()
+        
+        if choice == "1":
+            model_type = "gpt1"
+            break
+        elif choice == "2":
+            model_type = "gpt2"
+            break
+        else:
+            print("❌ Неверный выбор. Введите 1 или 2.")
+    
+    # Создаем и запускаем чат
+    chat = GPTChat(model_type)
+    chat.run_chat()
 
 if __name__ == "__main__":
-    chat = GPT1Chat()
-    chat.run_chat()
+    main()
