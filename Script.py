@@ -24,11 +24,11 @@ class GPTChat:
         
         self.model.eval()
         
-        # Настройки генерации
-        self.max_length = 250
+        # Увеличенные настройки генерации
+        self.max_length = 1000  # Увеличено до 1000 символов
         self.temperature = 0.8
         self.top_k = 50
-        self.top_p = 0.9  # Добавляем top-p для лучшего контроля
+        self.top_p = 0.9
         
         print(f"✅ {model_type.upper()} готов к общению!")
         self.show_commands()
@@ -88,7 +88,7 @@ class GPTChat:
             inputs = encoded['input_ids']
             attention_mask = encoded.get('attention_mask', None)
             
-            # Ограичиваем длину контекста
+            # Ограничиваем длину контекста
             max_context = 400 if self.model_type == "gpt1" else 600
             if inputs.size(1) > max_context:
                 inputs = inputs[:, -max_context:]
@@ -99,12 +99,15 @@ class GPTChat:
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
             
-            # Генерируем с фиксированными параметрами
+            # Увеличиваем количество новых токенов для генерации более длинных ответов
+            max_new_tokens = 150 if self.model_type == "gpt1" else 200
+            
+            # Генерируем с исправленными параметрами
             with torch.no_grad():
                 outputs = self.model.generate(
                     inputs,
                     attention_mask=attention_mask,
-                    max_new_tokens=60,  # Используем max_new_tokens вместо max_length
+                    max_new_tokens=max_new_tokens,
                     temperature=self.temperature,
                     top_k=self.top_k,
                     top_p=self.top_p,
@@ -113,7 +116,7 @@ class GPTChat:
                     eos_token_id=self.tokenizer.eos_token_id,
                     no_repeat_ngram_size=2,
                     repetition_penalty=1.1,
-                    early_stopping=True
+                    # Убираем early_stopping=True чтобы избежать предупреждения
                 )
             
             # Декодируем полный ответ
@@ -132,15 +135,16 @@ class GPTChat:
             if bot_response.startswith('"') and bot_response.endswith('"'):
                 bot_response = bot_response[1:-1].strip()
             
-            # Обрезаем ответ до максимальной длины
+            # Обрезаем ответ до максимальной длины (теперь 1000 символов)
             if len(bot_response) > self.max_length:
                 truncated = bot_response[:self.max_length]
+                # Ищем последнее завершение предложения
                 last_sentence_end = max(
                     truncated.rfind('.'),
                     truncated.rfind('!'),
                     truncated.rfind('?')
                 )
-                if last_sentence_end > 30:
+                if last_sentence_end > 50:  # Минимальная длина ответа
                     bot_response = truncated[:last_sentence_end + 1]
                 else:
                     bot_response = truncated.rstrip() + "..."
@@ -175,9 +179,9 @@ class GPTChat:
             if new_temp.strip():
                 self.temperature = max(0.1, min(2.0, float(new_temp)))
             
-            new_length = input(f"Новая максимальная длина (50-500, текущая {self.max_length}): ")
+            new_length = input(f"Новая максимальная длина (50-2000, текущая {self.max_length}): ")
             if new_length.strip():
-                self.max_length = max(50, min(500, int(new_length)))
+                self.max_length = max(50, min(2000, int(new_length)))
             
             new_top_k = input(f"Новый top-k (1-100, текущий {self.top_k}): ")
             if new_top_k.strip():
@@ -232,8 +236,8 @@ class GPTChat:
                 # Обновляем историю
                 self.conversation_history += f"\nHuman: {user_input}\nAssistant: {response}"
                 
-                # Ограничиваем историю
-                max_history = 800 if self.model_type == "gpt1" else 1200
+                # Ограничиваем историю (увеличиваем лимиты для более длинных ответов)
+                max_history = 1000 if self.model_type == "gpt1" else 1500
                 if len(self.conversation_history) > max_history:
                     self.conversation_history = self.conversation_history[-max_history:]
                 
